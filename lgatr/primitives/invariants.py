@@ -25,6 +25,27 @@ _LIGHTCONE_METRIC_SIGNS = (
 )
 
 
+def _swap_plus_minus(x: torch.Tensor) -> torch.Tensor:
+    # x[..., _LIGHTCONE_METRIC_PERM] from static slices: unlike a gather, its compiled backward
+    # needs no scatter.
+    return torch.cat(
+        [
+            x[..., 0:1],
+            x[..., 1:3].flip(-1),
+            x[..., 3:6],
+            x[..., 8:10],
+            x[..., 6:8],
+            x[..., 10:13],
+            x[..., 13:15].flip(-1),
+            x[..., 15:16],
+        ],
+        dim=-1,
+    )
+
+
+assert torch.equal(_swap_plus_minus(torch.arange(16)), _LIGHTCONE_METRIC_PERM)
+
+
 @lru_cache
 def _load_inner_product_factors(
     device: torch.device = DEFAULT_DEVICE,
@@ -38,17 +59,15 @@ def _load_inner_product_factors(
 def _load_lightcone_metric(
     device: torch.device = DEFAULT_DEVICE,
     dtype: torch.dtype = DEFAULT_DTYPE,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # (permutation, signs) of shape (16,) each of the light-cone metric, cast to (device, dtype).
-    perm = _LIGHTCONE_METRIC_PERM.to(device=device)
-    return perm, _LIGHTCONE_METRIC_SIGNS.to(device=device, dtype=dtype)
+) -> torch.Tensor:
+    # Signs of shape (16,) of the light-cone metric after _swap_plus_minus, cast to (device, dtype).
+    return _LIGHTCONE_METRIC_SIGNS.to(device=device, dtype=dtype)
 
 
 def _apply_metric(x: torch.Tensor, lightcone: bool) -> torch.Tensor:
     """GA metric applied to multivectors over the component dim (-1)."""
     if lightcone:
-        perm, signs = _load_lightcone_metric(device=x.device, dtype=x.dtype)
-        return x[..., perm] * signs
+        return _swap_plus_minus(x) * _load_lightcone_metric(device=x.device, dtype=x.dtype)
     return x * _load_inner_product_factors(device=x.device, dtype=x.dtype)
 
 
